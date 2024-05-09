@@ -53,29 +53,19 @@ mod tests {
         let id = Uuid::new_v4();
 
         // insert a row into the table
-        sqlx::query(
+        let xmin: Xid = sqlx::query_scalar(
             r#"
-            INSERT INTO test_table (id, value) VALUES ($1, $2)
+            INSERT INTO test_table (id, value) VALUES ($1, $2) RETURNING xmin
             "#,
         )
         .bind(id)
         .bind("test")
-        .execute(&mut conn)
+        .fetch_one(&mut conn)
         .await
         .expect("Insert row fail.");
 
-        let row: Xid = sqlx::query_scalar(
-            r#"
-            SELECT xmin FROM test_table WHERE id = $1
-            "#,
-        )
-        .bind(id)
-        .fetch_one(&mut conn)
-        .await
-        .expect("Select row fail.");
-
         // update the row without checking the xmin
-        _ = sqlx::query(
+        let affected_row = sqlx::query(
             r#"
             UPDATE test_table SET value = $1 WHERE id = $2
             "#,
@@ -84,7 +74,10 @@ mod tests {
         .bind(id)
         .execute(&mut conn)
         .await
-        .expect("Update row fail.");
+        .expect("Update row fail.")
+        .rows_affected();
+
+        assert_eq!(affected_row, 1);
 
         // update the row with checking the xmin
         let affected_rows = sqlx::query(
@@ -94,7 +87,7 @@ mod tests {
         )
         .bind("test3")
         .bind(id)
-        .bind(row)
+        .bind(xmin)
         .execute(&mut conn)
         .await
         .expect("Update row fail.")
